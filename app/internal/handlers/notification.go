@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"umani-service/app/internal/config"
@@ -16,10 +14,6 @@ import (
 
 func HandleNotification(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-
-		body, _ := io.ReadAll(c.Request.Body)
-		fmt.Printf("Raw request body: %s", string(body))
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 
 		// Read request body
 		if c.ContentType() != "application/x-www-form-urlencoded" {
