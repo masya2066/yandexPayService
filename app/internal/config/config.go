@@ -26,8 +26,10 @@ func LoadConfig() Config {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if err := os.Getenv("CONFIG_PATH"); err != "" {
-		slog.Default().Error("CONFIG_PATH is required! CONFIG_PATH is set to %s", err)
+	configPath = os.Getenv("CONFIG_PATH")
+
+	if configPath == "" {
+		configPath = "config.json"
 	}
 
 	file, err := os.Open(configPath)

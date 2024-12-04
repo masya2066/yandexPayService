@@ -5,10 +5,16 @@ import (
 	"umani-service/app/internal/handlers"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"umani-service/app/internal/config"
 )
 
 func main() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		panic(err)
+	}
+
 	cfg := config.LoadConfig()
 
 	router := gin.Default()
