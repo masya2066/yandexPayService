@@ -57,8 +57,7 @@ func HandleNotification(cfg config.Config) gin.HandlerFunc {
 }
 
 func generateSHA1Hash(n models.Notification, secret string) string {
-	data := fmt.Sprintf(
-		"%s&%s&%s&%s&%s&%s&%t&%s&%s",
+	log.Printf("Signature input: %s&%s&%s&%s&%s&%s&%t&%s&%s",
 		n.NotificationType,
 		n.OperationId,
 		n.Amount,
@@ -66,8 +65,21 @@ func generateSHA1Hash(n models.Notification, secret string) string {
 		n.DateTime,
 		n.Sender,
 		n.Codepro,
-		secret, // Secret word
+		secret,
 		n.Label,
+	)
+
+	data := fmt.Sprintf(
+		"%s&%s&%s&%s&%s&%s&%t&%s&%s",
+		n.NotificationType, // notification_type
+		n.OperationId,      // operation_id
+		n.Amount,           // amount
+		n.Currency,         // currency
+		n.DateTime,         // datetime
+		n.Sender,           // sender
+		n.Codepro,          // codepro
+		secret,             // секретное слово
+		n.Label,            // label
 	)
 
 	hash := sha1.New()
