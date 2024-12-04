@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"umani-service/app/internal/config"
@@ -16,41 +14,42 @@ import (
 
 func HandleNotification(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			log.Printf("Failed to read request body: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		// Read request body
+		if c.ContentType() != "application/x-www-form-urlencoded" {
+			log.Printf("Invalid Content-Type: %s", c.ContentType())
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Content-Type"})
 			return
 		}
-		log.Printf("Request body: %s", body)
 
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
-
+		// Parse form data
 		var notification models.Notification
-
-		// Parse request body
-		if err := c.BindJSON(&notification); err != nil {
-			log.Printf("Invalid notification payload: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid notification payload"})
+		if err := c.ShouldBind(&notification); err != nil {
+			log.Printf("Failed to bind form data: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse notification"})
 			return
 		}
 
-		// Generate expected hash
-		expectedHash := generateSHA1Hash(notification, cfg.SecretWord) // Use secret word
+		// Log parsed notification
+		log.Printf("Parsed notification: %+v", notification)
+
+		// Generate SHA-1 hash
+		expectedHash := generateSHA1Hash(notification, cfg.SecretWord)
 		if notification.Sha1Hash != expectedHash {
 			log.Printf("Invalid signature. Expected: %s, Got: %s", expectedHash, notification.Sha1Hash)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid signature"})
 			return
 		}
 
-		// Handler successful payment
-		if notification.NotificationType == "p2p-incoming" && !notification.Unaccepted {
-			log.Printf("Payment received: Label=%s, Amount=%s", notification.Label, notification.Amount)
-			c.JSON(http.StatusOK, gin.H{"message": "Notification processed"})
-			return
+		// Handle success notification
+		if notification.NotificationType == "p2p-incoming" || notification.NotificationType == "card-incoming" {
+			if !notification.Unaccepted {
+				log.Printf("Payment received: Label=%s, Amount=%s", notification.Label, notification.Amount)
+				c.JSON(http.StatusOK, gin.H{"message": "Notification processed"})
+				return
+			}
 		}
 
-		// Logging ignored notifications
+		// Ignore notification
 		log.Printf("Notification ignored: Type=%s, Unaccepted=%v", notification.NotificationType, notification.Unaccepted)
 		c.JSON(http.StatusOK, gin.H{"message": "Notification ignored"})
 	}
