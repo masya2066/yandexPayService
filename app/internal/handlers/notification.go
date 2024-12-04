@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"umani-service/app/internal/config"
@@ -14,6 +16,16 @@ import (
 
 func HandleNotification(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			log.Printf("Failed to read request body: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+			return
+		}
+		log.Printf("Request body: %s", body)
+
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
 		var notification models.Notification
 
 		// Parse request body
