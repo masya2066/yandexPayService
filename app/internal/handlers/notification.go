@@ -4,8 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"io"
-	"log/slog"
+	"log"
 	"net/http"
 	"umani-service/app/internal/config"
 	"umani-service/app/internal/models"
@@ -17,34 +16,49 @@ func HandleNotification(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var notification models.Notification
 
+		// Parse request body
 		if err := c.BindJSON(&notification); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid notification"})
+			log.Printf("Invalid notification payload: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid notification payload"})
 			return
 		}
 
-		expectedHash := generateSHA1Hash(notification, cfg.Receiver)
+		// Generate expected hash
+		expectedHash := generateSHA1Hash(notification, cfg.SecretWord) // Use secret word
 		if notification.Sha1Hash != expectedHash {
+			log.Printf("Invalid signature. Expected: %s, Got: %s", expectedHash, notification.Sha1Hash)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid signature"})
 			return
 		}
 
-		// Обработка успешного платежа
+		// Handler successful payment
 		if notification.NotificationType == "p2p-incoming" && !notification.Unaccepted {
-			slog.Default().Error("Payment received for label: %s, amount: %s\n", notification.Label, notification.Amount)
+			log.Printf("Payment received: Label=%s, Amount=%s", notification.Label, notification.Amount)
 			c.JSON(http.StatusOK, gin.H{"message": "Notification processed"})
 			return
 		}
 
+		// Logging ignored notifications
+		log.Printf("Notification ignored: Type=%s, Unaccepted=%v", notification.NotificationType, notification.Unaccepted)
 		c.JSON(http.StatusOK, gin.H{"message": "Notification ignored"})
 	}
 }
 
-// Генерация SHA-1 подписи
 func generateSHA1Hash(n models.Notification, secret string) string {
-	data := fmt.Sprintf("%s&%s&%s&%s&%s&%s&%t&%s&%s",
-		n.NotificationType, n.OperationId, n.Amount, n.Currency, n.DateTime,
-		n.Sender, n.Codepro, secret, n.Label)
+	data := fmt.Sprintf(
+		"%s&%s&%s&%s&%s&%s&%t&%s&%s",
+		n.NotificationType,
+		n.OperationId,
+		n.Amount,
+		n.Currency,
+		n.DateTime,
+		n.Sender,
+		n.Codepro,
+		secret, // Secret word
+		n.Label,
+	)
+
 	hash := sha1.New()
-	io.WriteString(hash, data)
+	hash.Write([]byte(data))
 	return hex.EncodeToString(hash.Sum(nil))
 }

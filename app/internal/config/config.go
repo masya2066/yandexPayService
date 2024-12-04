@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	Receiver   string `json:"receiver"`    // yandex_number_wallet
+	SecretWord string `json:"secret_word"` // secret_word
 	SuccessURL string `json:"success_url"` // success url to send user after success payment
 	FailURL    string `json:"fail_url"`    // failed url to send user after failed payment
 	SendURL    string `json:"send_url"`    // url to send notification to another service
@@ -37,6 +38,7 @@ func LoadConfig() Config {
 		// Create file if not exist
 		currentConfig = Config{
 			Receiver:   "yandex_wallet_number",
+			SecretWord: "secret_word",
 			SuccessURL: "http://localhost:8080/success",
 			FailURL:    "http://localhost:8080/fail",
 			SendURL:    "http://localhost:8080/send",
