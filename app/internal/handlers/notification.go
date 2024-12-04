@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"umani-service/app/internal/config"
 	"umani-service/app/internal/models"
 
@@ -57,17 +58,11 @@ func HandleNotification(cfg config.Config) gin.HandlerFunc {
 }
 
 func generateSHA1Hash(n models.Notification, secret string) string {
-	log.Printf("Signature input: %s&%s&%s&%s&%s&%s&%t&%s&%s",
-		n.NotificationType,
-		n.OperationId,
-		n.Amount,
-		n.Currency,
-		n.DateTime,
-		n.Sender,
-		n.Codepro,
-		secret,
-		n.Label,
-	)
+	codepro, err := strconv.ParseBool(n.Codepro)
+	if err != nil {
+		log.Printf("Invalid Codepro value: %s", n.Codepro)
+		return ""
+	}
 
 	data := fmt.Sprintf(
 		"%s&%s&%s&%s&%s&%s&%t&%s&%s",
@@ -77,7 +72,7 @@ func generateSHA1Hash(n models.Notification, secret string) string {
 		n.Currency,         // currency
 		n.DateTime,         // datetime
 		n.Sender,           // sender
-		n.Codepro,          // codepro
+		codepro,            // codepro
 		secret,             // секретное слово
 		n.Label,            // label
 	)
