@@ -1,12 +1,14 @@
 package main
 
 import (
-	"log"
-	"umani-service/app/internal/handlers"
-
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"log"
+	"os"
 	"umani-service/app/internal/config"
+	"umani-service/app/internal/consumer"
+	"umani-service/app/internal/db"
+	"umani-service/app/internal/handlers"
 )
 
 func main() {
@@ -17,6 +19,14 @@ func main() {
 
 	cfg := config.LoadConfig()
 
+	initDB, err := db.InitDatabase(os.Getenv("SQLITE_PATH"))
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer initDB.Close()
+
+	go consumer.RetryFailedNotifications(cfg, initDB)
+
 	router := gin.Default()
 
 	yandex := router.Group("/yandex")
@@ -24,7 +34,7 @@ func main() {
 		order := yandex.Group("/order")
 		{
 			order.POST("/create", handlers.CreateOrder(cfg))
-			order.POST("/notification", handlers.HandleNotification(cfg))
+			order.POST("/notification", handlers.HandleNotification(cfg, initDB))
 		}
 	}
 	log.Printf("Starting server on port %s...", cfg.AppPort)

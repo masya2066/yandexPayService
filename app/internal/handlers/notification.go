@@ -1,24 +1,28 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/sha1"
+	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"umani-service/app/internal/config"
+	"umani-service/app/internal/db"
 	"umani-service/app/internal/models"
 
 	"github.com/gin-gonic/gin"
 )
 
-func HandleNotification(cfg config.Config) gin.HandlerFunc {
+func HandleNotification(cfg config.Config, db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 
 		// Read request body
 		if c.ContentType() != "application/x-www-form-urlencoded" {
-			log.Printf("Invalid Content-Type: %s", c.ContentType())
+			slog.Default().Error("Invalid Content-Type:", c.ContentType())
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Content-Type"})
 			return
 		}
@@ -26,41 +30,118 @@ func HandleNotification(cfg config.Config) gin.HandlerFunc {
 		// Parse form data
 		var notification models.Notification
 		if err := c.ShouldBind(&notification); err != nil {
-			log.Printf("Failed to bind form data: %v", err)
+			slog.Default().Error("Failed to bind form data:", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse notification"})
 			return
 		}
 
 		// Log parsed notification
-		log.Printf("Parsed notification: %+v", notification)
+		slog.Default().Info("Parsed notification:", notification)
 
 		// Generate SHA-1 hash
 		expectedHash := generateSHA1Hash(notification, cfg.SecretWord)
 		if notification.Sha1Hash != expectedHash {
-			log.Printf("Invalid signature. Expected: %s, Got: %s", expectedHash, notification.Sha1Hash)
+			slog.Default().Error("Invalid signature. Expected: " + expectedHash + ", Got: " + notification.Sha1Hash)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid signature"})
 			return
 		}
 
-		// Handle success notification
 		if notification.NotificationType == "p2p-incoming" || notification.NotificationType == "card-incoming" {
 			if !notification.Unaccepted {
-				log.Printf("Payment received: Label=%s, Amount=%s", notification.Label, notification.Amount)
-				c.JSON(http.StatusOK, gin.H{"message": "Notification processed"})
+				completedOrder := models.CompletedOrder{
+					OrderID:          notification.OperationId,
+					OperationID:      notification.OperationId,
+					Sender:           notification.Sender,
+					Amount:           notification.Amount,
+					Currency:         notification.Currency,
+					Status:           true,
+					Sha1Hash:         notification.Sha1Hash,
+					TestNotification: notification.TestNotification,
+					Label:            notification.Label,
+					Handle:           "completed",
+				}
+
+				jsonBody, err := json.Marshal(completedOrder)
+				if err != nil {
+					slog.Default().Error("Error encoding completedOrder to JSON:", err)
+					return
+				}
+
+				req, err := http.NewRequest("POST", cfg.SendURL, bytes.NewBuffer(jsonBody))
+				if err != nil {
+					slog.Default().Error("Error creating HTTP request:", err)
+					saveFailedNotification(db, completedOrder)
+					return
+				}
+				req.Header.Set("Content-Type", "application/json")
+
+				client := &http.Client{}
+				resp, err := client.Do(req)
+				if err != nil || resp.StatusCode >= 400 {
+					slog.Default().Error("Error sending HTTP request or bad response:", err, resp.Status)
+					saveFailedNotification(db, completedOrder)
+					c.JSON(http.StatusOK, completedOrder)
+					return
+				}
+				defer resp.Body.Close()
+
+				slog.Default().Info("Response status:", resp.Status)
+				c.JSON(http.StatusOK, completedOrder)
 				return
 			}
 		}
 
-		// Ignore notification
-		log.Printf("Notification ignored: Type=%s, Unaccepted=%v", notification.NotificationType, notification.Unaccepted)
-		c.JSON(http.StatusOK, gin.H{"message": "Notification ignored"})
+		ignoreModel := models.CompletedOrder{
+			OrderID:          notification.OperationId,
+			OperationID:      notification.OperationId,
+			Sender:           notification.Sender,
+			Amount:           notification.Amount,
+			Currency:         notification.Currency,
+			Status:           false,
+			Sha1Hash:         notification.Sha1Hash,
+			TestNotification: notification.TestNotification,
+			Label:            notification.Label,
+			Handle:           "ignored",
+		}
+
+		// Log the ignored notification
+		slog.Default().Info("Notification ignored: Type="+notification.NotificationType, "Unaccepted=", notification.Unaccepted)
+
+		// Respond with the ignoreModel
+		c.JSON(http.StatusOK, ignoreModel)
+
+		// Encode the ignoreModel to JSON
+		jsonBody, err := json.Marshal(ignoreModel)
+		if err != nil {
+			slog.Default().Error("Error encoding ignoreModel to JSON:", err)
+			return
+		}
+
+		// Create a new HTTP POST request
+		req, err := http.NewRequest("POST", cfg.SendURL, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			slog.Default().Error("Error creating HTTP request:", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		// Optionally, send the request using an HTTP client
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Default().Error("Error sending HTTP request:", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		slog.Default().Info("Response status:", resp.Status)
 	}
 }
 
 func generateSHA1Hash(n models.Notification, secret string) string {
 	codepro, err := strconv.ParseBool(n.Codepro)
 	if err != nil {
-		log.Printf("Invalid Codepro value: %s", n.Codepro)
+		slog.Default().Error("Invalid Codepro value:", n.Codepro)
 		return ""
 	}
 
@@ -80,4 +161,11 @@ func generateSHA1Hash(n models.Notification, secret string) string {
 	hash := sha1.New()
 	hash.Write([]byte(data))
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func saveFailedNotification(database *sql.DB, order models.CompletedOrder) {
+	err := db.SaveUnsentNotification(database, order)
+	if err != nil {
+		slog.Default().Error("Failed to save unsent notification:", err)
+	}
 }

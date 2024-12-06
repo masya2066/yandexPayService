@@ -28,9 +28,13 @@ func LoadConfig() Config {
 	defer mutex.Unlock()
 
 	configPath = os.Getenv("CONFIG_PATH")
-
 	if configPath == "" {
 		configPath = "config.json"
+	}
+
+	SQLitePath := os.Getenv("SQLITE_PATH")
+	if SQLitePath == "" {
+		os.Setenv("SQLITE_PATH", "unsentNotify.db")
 	}
 
 	file, err := os.Open(configPath)

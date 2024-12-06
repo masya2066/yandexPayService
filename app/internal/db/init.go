@@ -1,48 +1,49 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"log/slog"
+	_ "modernc.org/sqlite" // SQLite драйвер
 	"os"
 )
 
-type config struct {
-	Host     string
-	Port     string
-	User     string
-	Password string
-	DBName   string
-	SSLMode  string
-}
-
-type DB struct {
-	*gorm.DB
-}
-
-func InitDB() (*DB, error) {
-	cfg := config{
-		Host:     os.Getenv("DB_HOST"),
-		Port:     os.Getenv("DB_PORT"),
-		User:     os.Getenv("DB_USER"),
-		Password: os.Getenv("DB_PASSWORD"),
-		DBName:   os.Getenv("DB_NAME"),
-		SSLMode:  os.Getenv("DB_SSLMODE"),
+// Initialize SQLite database
+func InitDatabase(dbPath string) (*sql.DB, error) {
+	// Check if the directory for the database exists
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		file, err := os.Create(dbPath) // Create the file explicitly
+		if err != nil {
+			return nil, fmt.Errorf("failed to create database file: %w", err)
+		}
+		file.Close()
 	}
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s", cfg.Host, cfg.User, cfg.Password, cfg.DBName, cfg.Port, cfg.SSLMode)
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	// Open the SQLite database
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to SQLite: %w", err)
 	}
 
-	if err := db.AutoMigrate(); err != nil {
-		return nil, err
+	// Create table for failed notifications if not exists
+	createTableQuery := `
+	CREATE TABLE IF NOT EXISTS failed_notifications (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		order_id TEXT NOT NULL,
+		operation_id TEXT,
+		sender TEXT,
+		amount TEXT NOT NULL,
+		currency TEXT,
+		status BOOLEAN NOT NULL,
+		sha1_hash TEXT,
+		test_notification BOOLEAN DEFAULT FALSE,
+		label TEXT,
+		handle TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+	_, err = db.Exec(createTableQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 
-	slog.Default().Info("Database migrated and connected successfully!")
-
-	return &DB{db}, nil
+	return db, nil
 }
