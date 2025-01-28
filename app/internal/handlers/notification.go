@@ -146,8 +146,8 @@ func HandleCardlinkNotification(cfg config.Config, db *sql.DB) gin.HandlerFunc {
 
 		// 1. Проверяем Content-Type
 		slog.Default().Info("Checking Content-Type...", "content-type", c.ContentType())
-		if c.ContentType() != "application/json" {
-			slog.Default().Error("Invalid Content-Type", "expected", "application/json", "got", c.ContentType())
+		if c.ContentType() != "application/json" && c.ContentType() != "application/x-www-form-urlencoded" {
+			slog.Default().Error("Invalid Content-Type", "got", c.ContentType())
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Content-Type"})
 			return
 		}
@@ -155,7 +155,7 @@ func HandleCardlinkNotification(cfg config.Config, db *sql.DB) gin.HandlerFunc {
 		// 2. Парсим JSON в вашу структуру
 		slog.Default().Info("Parsing JSON into CardLinkNotification...")
 		var notification models.CardLinkNotification
-		if err := c.ShouldBindJSON(&notification); err != nil {
+		if err := c.ShouldBind(&notification); err != nil {
 			slog.Default().Error("Failed to parse JSON", "error", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse notification"})
 			return
