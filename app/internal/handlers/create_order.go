@@ -50,6 +50,7 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 			return
 		}
+		order.ShopID = cfg.ShopIDCardLink
 		log.Printf("[CreateOrderCardLink] Order bound successfully: %+v\n", order)
 
 		// 2. Готовим multipart/form-data для CardLink
