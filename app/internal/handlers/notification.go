@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/md5"
 	"crypto/sha1"
 	"database/sql"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"umani-service/app/internal/config"
 	"umani-service/app/internal/db"
 	"umani-service/app/internal/models"
@@ -135,6 +137,149 @@ func HandleNotification(cfg config.Config, db *sql.DB) gin.HandlerFunc {
 		defer resp.Body.Close()
 
 		slog.Default().Info("Response status:", resp.Status)
+	}
+}
+
+func HandleCardlinkNotification(cfg config.Config, db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		slog.Default().Info("HandleCardlinkNotification => START")
+
+		// 1. Проверяем Content-Type
+		slog.Default().Info("Checking Content-Type...", "content-type", c.ContentType())
+		if c.ContentType() != "application/json" {
+			slog.Default().Error("Invalid Content-Type", "expected", "application/json", "got", c.ContentType())
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Content-Type"})
+			return
+		}
+
+		// 2. Парсим JSON в вашу структуру
+		slog.Default().Info("Parsing JSON into CardLinkNotification...")
+		var notification models.CardLinkNotification
+		if err := c.ShouldBindJSON(&notification); err != nil {
+			slog.Default().Error("Failed to parse JSON", "error", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse notification"})
+			return
+		}
+		slog.Default().Info("Notification parsed successfully", "notification", notification)
+
+		// 3. Генерируем подпись и сравниваем
+		signString := fmt.Sprintf("%d:%s:%s", notification.OutSum, notification.TrsId, cfg.SecretWord)
+		md5Hash := md5.Sum([]byte(signString))
+		expectedSignature := strings.ToUpper(hex.EncodeToString(md5Hash[:]))
+
+		slog.Default().Info("Verifying signature",
+			"calculated_signature", expectedSignature,
+			"received_signature", notification.SignatureValue,
+		)
+
+		if notification.SignatureValue != expectedSignature {
+			slog.Default().Error("Invalid signature", "expected", expectedSignature, "got", notification.SignatureValue)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid signature"})
+			return
+		}
+		slog.Default().Info("Signature verified successfully")
+
+		// 4. Проверяем статус платежа
+		slog.Default().Info("Checking payment status", "status", notification.Status)
+		if notification.Status == "SUCCESS" {
+			slog.Default().Info("Payment status is SUCCESS, creating CompletedOrder")
+
+			// Формируем структуру для дальнейшей обработки / записи в БД
+			completedOrder := models.CompletedOrder{
+				OrderID:          strconv.Itoa(notification.InvId),
+				OperationID:      notification.TrsId,
+				Sender:           "CardLink",
+				Amount:           fmt.Sprintf("%d", notification.OutSum),
+				Currency:         notification.CurrencyIn,
+				Status:           true,
+				Sha1Hash:         notification.SignatureValue,
+				TestNotification: false,
+				Label:            "cardlink",
+				Handle:           "completed",
+			}
+
+			jsonBody, err := json.Marshal(completedOrder)
+			if err != nil {
+				slog.Default().Error("Error encoding completedOrder to JSON", "error", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal error"})
+				return
+			}
+
+			// 5. Отправляем POST-запрос на ваш сервис
+			slog.Default().Info("Sending completedOrder to external service", "url", cfg.SendURL)
+			req, err := http.NewRequest("POST", cfg.SendURL, bytes.NewBuffer(jsonBody))
+			if err != nil {
+				slog.Default().Error("Error creating HTTP request", "error", err)
+				saveFailedNotification(db, completedOrder)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil || resp.StatusCode >= 400 {
+				status := ""
+				if resp != nil {
+					status = resp.Status
+				}
+				slog.Default().Error("Error sending request or bad response", "error", err, "status", status)
+				saveFailedNotification(db, completedOrder)
+				c.JSON(http.StatusOK, completedOrder)
+				return
+			}
+			defer resp.Body.Close()
+
+			slog.Default().Info("SUCCESS payout processed", "response_status", resp.Status)
+			c.JSON(http.StatusOK, completedOrder)
+			slog.Default().Info("HandleCardlinkNotification => END")
+			return
+		}
+
+		// Иначе (не SUCCESS) — игнорируем или обрабатываем по-своему
+		slog.Default().Info("Notification ignored (status != SUCCESS)", "status", notification.Status)
+		ignoreModel := models.CompletedOrder{
+			OrderID:          strconv.Itoa(notification.InvId),
+			OperationID:      notification.TrsId,
+			Sender:           "",
+			Amount:           fmt.Sprintf("%d", notification.OutSum),
+			Currency:         notification.CurrencyIn,
+			Status:           false,
+			Sha1Hash:         notification.SignatureValue,
+			TestNotification: false,
+			Label:            "cardlink",
+			Handle:           "ignored",
+		}
+		c.JSON(http.StatusOK, ignoreModel)
+
+		// Если вы всё равно хотите отправлять «ignored» на cfg.SendURL:
+		slog.Default().Info("Sending ignored notification to external service", "url", cfg.SendURL)
+		jsonBody, err := json.Marshal(ignoreModel)
+		if err != nil {
+			slog.Default().Error("Error encoding ignoreModel to JSON", "error", err)
+			slog.Default().Info("HandleCardlinkNotification => END (with error encoding ignoreModel)")
+			return
+		}
+
+		req, err := http.NewRequest("POST", cfg.SendURL, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			slog.Default().Error("Error creating HTTP request (ignored model)", "error", err)
+			slog.Default().Info("HandleCardlinkNotification => END (with error creating request for ignored model)")
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Default().Error("Error sending HTTP request (ignored model)", "error", err)
+			slog.Default().Info("HandleCardlinkNotification => END (with error sending ignored model)")
+			return
+		}
+		defer resp.Body.Close()
+
+		slog.Default().Info("Ignored notification sent successfully", "response_status", resp.Status)
+		slog.Default().Info("HandleCardlinkNotification => END")
 	}
 }
 
