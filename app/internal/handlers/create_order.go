@@ -69,7 +69,7 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'shop_id': " + err.Error()})
 			return
 		}
-		if err := writer.WriteField("currency_id", order.CurrencyIn); err != nil {
+		if err := writer.WriteField("currency_in", order.CurrencyIn); err != nil {
 			log.Printf("[CreateOrderCardLink] Failed to write field 'currency_id': %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'currency_id': " + err.Error()})
 			return
