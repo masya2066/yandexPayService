@@ -33,12 +33,12 @@ type CardLinkFail struct {
 }
 
 type CardLinkNotification struct {
-	InvId          int    `json:"InvId"`
-	OutSum         int    `json:"OutSum"`
-	CurrencyIn     string `json:"CurrencyIn"`
-	Commission     int    `json:"Commission"`
-	TrsId          string `json:"TrsId"`
-	Status         string `json:"Status"`
-	Custom         string `json:"custom"`
-	SignatureValue string `json:"SignatureValue"`
+	InvId          int     `json:"InvId"`
+	OutSum         float64 `json:"OutSum"`
+	CurrencyIn     string  `json:"CurrencyIn"`
+	Commission     int     `json:"Commission"`
+	TrsId          string  `json:"TrsId"`
+	Status         string  `json:"Status"`
+	Custom         string  `json:"custom"`
+	SignatureValue string  `json:"SignatureValue"`
 }
