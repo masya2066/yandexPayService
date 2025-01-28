@@ -51,6 +51,7 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 			return
 		}
 		order.ShopID = cfg.ShopIDCardLink
+
 		log.Printf("[CreateOrderCardLink] Order bound successfully: %+v\n", order)
 
 		// 2. Готовим multipart/form-data для CardLink
@@ -73,6 +74,15 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'currency_id': " + err.Error()})
 			return
 		}
+
+		if order.PaymentMethod != "" {
+			if err := writer.WriteField("payment_method", order.PaymentMethod); err != nil {
+				log.Printf("[CreateOrderCardLink] Failed to write field 'payment_methods': %v\n", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'payment_methods': " + err.Error()})
+				return
+			}
+		}
+
 		log.Println("[CreateOrderCardLink] All fields written to multipart form.")
 
 		// Закрываем writer, чтобы финализировать формирование multipart
