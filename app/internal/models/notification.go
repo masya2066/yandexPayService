@@ -36,7 +36,7 @@ type CardLinkNotification struct {
 	InvId          int    `form:"InvId"`
 	OutSum         string `form:"OutSum"`
 	CurrencyIn     string `form:"CurrencyIn"`
-	Commission     int    `form:"Commission"`
+	Commission     string `form:"Commission"`
 	TrsId          string `form:"TrsId"`
 	Status         string `form:"Status"`
 	Custom         string `form:"custom"`
