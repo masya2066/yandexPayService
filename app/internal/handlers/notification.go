@@ -186,15 +186,15 @@ func HandleCardlinkNotification(cfg config.Config, db *sql.DB) gin.HandlerFunc {
 
 			// Формируем структуру для дальнейшей обработки / записи в БД
 			completedOrder := models.CompletedOrder{
-				OrderID:          strconv.Itoa(notification.InvId),
-				OperationID:      notification.TrsId,
+				OrderID:          notification.TrsId,
+				OperationID:      strconv.Itoa(notification.InvId),
 				Sender:           "CardLink",
 				Amount:           fmt.Sprintf("%d", notification.OutSum),
 				Currency:         notification.CurrencyIn,
 				Status:           true,
 				Sha1Hash:         notification.SignatureValue,
 				TestNotification: false,
-				Label:            "cardlink",
+				Label:            notification.TrsId,
 				Handle:           "completed",
 			}
 
@@ -239,15 +239,15 @@ func HandleCardlinkNotification(cfg config.Config, db *sql.DB) gin.HandlerFunc {
 		// Иначе (не SUCCESS) — игнорируем или обрабатываем по-своему
 		slog.Default().Info("Notification ignored (status != SUCCESS)", "status", notification.Status)
 		ignoreModel := models.CompletedOrder{
-			OrderID:          strconv.Itoa(notification.InvId),
-			OperationID:      notification.TrsId,
+			OrderID:          notification.TrsId,
+			OperationID:      strconv.Itoa(notification.InvId),
 			Sender:           "",
 			Amount:           fmt.Sprintf("%d", notification.OutSum),
 			Currency:         notification.CurrencyIn,
 			Status:           false,
 			Sha1Hash:         notification.SignatureValue,
 			TestNotification: false,
-			Label:            "cardlink",
+			Label:            notification.TrsId,
 			Handle:           "ignored",
 		}
 		c.JSON(http.StatusOK, ignoreModel)
