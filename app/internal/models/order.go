@@ -25,7 +25,7 @@ type OrderCardLink struct {
 	Amount        string `json:"amount"`
 	ShopID        string `json:"shop_id"`
 	CurrencyIn    string `json:"currency_in"`
-	PaymentMethod string `json:"payment_methods"`
+	PaymentMethod string `json:"payment_method"`
 }
 
 type OrderCardLinkResponse struct {
