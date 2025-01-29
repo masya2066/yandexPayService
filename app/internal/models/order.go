@@ -20,3 +20,17 @@ type CompletedOrder struct {
 	Label            string `json:"label"`
 	Handle           string `json:"handle"`
 }
+
+type OrderCardLink struct {
+	Amount        string `json:"amount"`
+	ShopID        string `json:"shop_id"`
+	CurrencyIn    string `json:"currency_in"`
+	PaymentMethod string `json:"payment_method"`
+}
+
+type OrderCardLinkResponse struct {
+	Success     string `json:"success"`
+	LinkURL     string `json:"link_url"`
+	LinkPageURL string `json:"link_page_url"`
+	BillID      string `json:"bill_id"`
+}

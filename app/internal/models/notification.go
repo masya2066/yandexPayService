@@ -15,3 +15,30 @@ type Notification struct {
 	TestNotification bool   `form:"test_notification"`
 	OperationLabel   string `form:"operation_label"`
 }
+
+type CardLinkSuccess struct {
+	InvId          int    `json:"InvId"`
+	OutSum         int    `json:"OutSum"`
+	Custom         string `json:"custom"`
+	CurrencyIn     string `json:"CurrencyIn"`
+	SignatureValue string `json:"SignatureValue"`
+}
+
+type CardLinkFail struct {
+	InvId          int    `json:"InvId"`
+	OutSum         int    `json:"OutSum"`
+	Custom         string `json:"custom"`
+	CurrencyIn     string `json:"CurrencyIn"`
+	SignatureValue string `json:"SignatureValue"`
+}
+
+type CardLinkNotification struct {
+	InvId          int    `form:"InvId"`
+	OutSum         string `form:"OutSum"`
+	CurrencyIn     string `form:"CurrencyIn"`
+	Commission     string `form:"Commission"`
+	TrsId          string `form:"TrsId"`
+	Status         string `form:"Status"`
+	Custom         string `form:"custom"`
+	SignatureValue string `form:"SignatureValue"`
+}

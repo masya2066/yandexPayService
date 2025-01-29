@@ -37,6 +37,14 @@ func main() {
 			order.POST("/notification", handlers.HandleNotification(cfg, initDB))
 		}
 	}
+	cardlink := router.Group("/cardlink")
+	{
+		order := cardlink.Group("/order")
+		{
+			order.POST("/create", handlers.CreateOrderCardLink(cfg))
+			order.POST("/notification", handlers.HandleCardlinkNotification(cfg, initDB))
+		}
+	}
 	log.Printf("Starting server on port %s...", cfg.AppPort)
 	if err := router.Run(":" + cfg.AppPort); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
