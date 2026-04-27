@@ -75,7 +75,7 @@ func CreateOrderB2Pay(_ config.Config, client *b2pay.Client) gin.HandlerFunc {
 			CustomerID:  customerID,
 			Amount:      amount,
 			Currency:    req.Currency,
-			Description: req.Description,
+			Description: paymentDescription(req.Description),
 			Metadata: meta{
 				TestMode:        testMode,
 				CustomerEmail:   customerEmail,

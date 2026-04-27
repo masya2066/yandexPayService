@@ -16,6 +16,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func paymentDescription(d string) string {
+	s := strings.TrimSpace(d)
+	if s == "" {
+		return "Payment"
+	}
+	return s
+}
+
 func CreateOrder(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req models.CreatePaymentRequest
@@ -31,7 +39,7 @@ func CreateOrder(cfg config.Config) gin.HandlerFunc {
 
 		yoomoneyBaseURL := "https://yoomoney.ru/quickpay/confirm.xml"
 		paymentLink := fmt.Sprintf("%s?receiver=%s&quickpay-form=shop&targets=%s&sum=%s&successURL=%s&failURL=%s&label=%s",
-			yoomoneyBaseURL, cfg.Receiver, req.Description, req.Amount, cfg.SuccessURL, cfg.FailURL, orderID)
+			yoomoneyBaseURL, cfg.Receiver, paymentDescription(req.Description), req.Amount, cfg.SuccessURL, cfg.FailURL, orderID)
 
 		c.JSON(http.StatusOK, models.CreatePaymentResponse{
 			OrderID:     orderID,

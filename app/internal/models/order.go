@@ -4,7 +4,7 @@ package models
 // Extra fields (currency, payment_method, customer_id, …) are ignored by methods that do not use them.
 type CreatePaymentRequest struct {
 	Amount              string `json:"amount" binding:"required"`
-	Description         string `json:"description" binding:"required"`
+	Description         string `json:"description"` // optional — legacy CardLink clients often omit it
 	Email               string `json:"email"`
 	Currency            string `json:"currency"`
 	OrderID             string `json:"order_id"`
