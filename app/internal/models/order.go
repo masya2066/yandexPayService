@@ -1,11 +1,25 @@
 package models
 
-type Order struct {
-	ID          string `json:"id"`
-	Email       string `json:"email"`
-	Amount      string `json:"amount"`
-	Description string `json:"description"`
+// CreatePaymentRequest is the unified JSON body for /yandex/order/create, /cardlink/order/create, and /b2pay/order/create.
+// Extra fields (currency, payment_method, customer_id, …) are ignored by methods that do not use them.
+type CreatePaymentRequest struct {
+	Amount              string `json:"amount" binding:"required"`
+	Description         string `json:"description" binding:"required"`
+	Email               string `json:"email"`
+	Currency            string `json:"currency"`
+	OrderID             string `json:"order_id"`
+	PaymentMethod       string `json:"payment_method"`
+	CustomerID          string `json:"customer_id"`
+	IsReturningCustomer *bool  `json:"is_returning_customer"`
+	TestMode            *bool  `json:"test_mode"`
+}
+
+// CreatePaymentResponse is the unified successful JSON for all payment create endpoints.
+type CreatePaymentResponse struct {
+	OrderID     string `json:"order_id"`
 	PaymentLink string `json:"payment_link"`
+	InvoiceID   string `json:"invoice_id,omitempty"`
+	Status      string `json:"status,omitempty"`
 }
 
 type CompletedOrder struct {
@@ -19,13 +33,6 @@ type CompletedOrder struct {
 	TestNotification bool   `json:"test_notification"`
 	Label            string `json:"label"`
 	Handle           string `json:"handle"`
-}
-
-type OrderCardLink struct {
-	Amount        string `json:"amount"`
-	ShopID        string `json:"shop_id"`
-	CurrencyIn    string `json:"currency_in"`
-	PaymentMethod string `json:"payment_method"`
 }
 
 type OrderCardLinkResponse struct {
