@@ -35,8 +35,8 @@ func CreateOrderB2Pay(_ config.Config, client *b2pay.Client) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
 			return
 		}
-		if strings.TrimSpace(req.Currency) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "currency is required for b2pay"})
+		if req.EffectiveCurrency() == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "currency or currency_in is required for b2pay"})
 			return
 		}
 
@@ -76,7 +76,7 @@ func CreateOrderB2Pay(_ config.Config, client *b2pay.Client) gin.HandlerFunc {
 		}{
 			CustomerID:  customerID,
 			Amount:      amount,
-			Currency:    req.Currency,
+			Currency:    req.EffectiveCurrency(),
 			Description: paymentDescription(req.Description),
 			Metadata: meta{
 				TestMode:        testMode,

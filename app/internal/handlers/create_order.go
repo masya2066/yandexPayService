@@ -80,13 +80,14 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 			return
 		}
-		if strings.TrimSpace(req.Currency) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "currency is required for cardlink"})
+		cur := req.EffectiveCurrency()
+		if cur == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "currency or currency_in is required for cardlink"})
 			return
 		}
 		shopID := cfg.ShopIDCardLink
 
-		log.Printf("[CreateOrderCardLink] Order bound successfully: %+v\n", req)
+		log.Printf("[CreateOrderCardLink] Order bound successfully: %+v (effective currency=%s)\n", req, cur)
 
 		// 2. Готовим multipart/form-data для CardLink
 		var bodyBuffer bytes.Buffer
@@ -103,7 +104,7 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'shop_id': " + err.Error()})
 			return
 		}
-		if err := writer.WriteField("currency_in", req.Currency); err != nil {
+		if err := writer.WriteField("currency_in", cur); err != nil {
 			log.Printf("[CreateOrderCardLink] Failed to write field 'currency_id': %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'currency_id': " + err.Error()})
 			return
