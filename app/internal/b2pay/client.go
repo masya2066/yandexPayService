@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -136,6 +137,7 @@ func (c *Client) CreateInvoice(payload []byte) ([]byte, int, error) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+tok)
+		log.Printf("[b2pay] POST /v1/invoices исходящее тело: %s", string(payload))
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return nil, 0, err
@@ -145,6 +147,7 @@ func (c *Client) CreateInvoice(payload []byte) ([]byte, int, error) {
 		if rerr != nil {
 			return nil, resp.StatusCode, rerr
 		}
+		log.Printf("[b2pay] POST /v1/invoices ответ HTTP %d тело: %s", resp.StatusCode, string(body))
 		lastCode = resp.StatusCode
 		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
 			c.invalidateToken()
