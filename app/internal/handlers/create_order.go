@@ -16,6 +16,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// readBodyLogRestore читает сырое тело HTTP-запроса Gin, пишет его в лог и возвращает Body для ShouldBindJSON.
+func readBodyLogRestore(c *gin.Context, handlerTag string) {
+	if c.Request.Body == nil {
+		log.Printf("[%s] входящее тело: <nil>", handlerTag)
+		return
+	}
+	b, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		log.Printf("[%s] входящее тело: ошибка чтения: %v", handlerTag, err)
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(b))
+	log.Printf("[%s] входящее тело: %s", handlerTag, string(b))
+}
+
 func paymentDescription(d string) string {
 	s := strings.TrimSpace(d)
 	if s == "" {
@@ -26,6 +41,7 @@ func paymentDescription(d string) string {
 
 func CreateOrder(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		readBodyLogRestore(c, "CreateOrder")
 		var req models.CreatePaymentRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
@@ -41,16 +57,21 @@ func CreateOrder(cfg config.Config) gin.HandlerFunc {
 		paymentLink := fmt.Sprintf("%s?receiver=%s&quickpay-form=shop&targets=%s&sum=%s&successURL=%s&failURL=%s&label=%s",
 			yoomoneyBaseURL, cfg.Receiver, paymentDescription(req.Description), req.Amount, cfg.SuccessURL, cfg.FailURL, orderID)
 
-		c.JSON(http.StatusOK, models.CreatePaymentResponse{
+		out := models.CreatePaymentResponse{
 			OrderID:     orderID,
 			PaymentLink: paymentLink,
-		})
+		}
+		if ob, err := json.Marshal(out); err == nil {
+			log.Printf("[CreateOrder] исходящий ответ клиенту: %s", string(ob))
+		}
+		c.JSON(http.StatusOK, out)
 	}
 }
 
 func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log.Println("[CreateOrderCardLink] => START")
+		readBodyLogRestore(c, "CreateOrderCardLink")
 
 		// 1. Единая модель CreatePaymentRequest (currency обязателен для CardLink)
 		var req models.CreatePaymentRequest
@@ -105,10 +126,12 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 			return
 		}
 		log.Println("[CreateOrderCardLink] Multipart writer closed successfully.")
+		log.Printf("[CreateOrderCardLink] исходящее тело в CardLink: Content-Type=%s len=%d raw=%q",
+			writer.FormDataContentType(), bodyBuffer.Len(), bodyBuffer.String())
 
 		// 3. Формируем запрос к CardLink
 		log.Println("[CreateOrderCardLink] Creating request to CardLink...")
-		httpReq, err := http.NewRequest("POST", "https://cardlink.link/api/v1/bill/create", &bodyBuffer)
+		httpReq, err := http.NewRequest("POST", "https://cardlink.link/api/v1/bill/create", bytes.NewReader(bodyBuffer.Bytes()))
 		if err != nil {
 			log.Printf("[CreateOrderCardLink] Failed to create request: %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create request: " + err.Error()})
@@ -151,10 +174,14 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 		}
 		log.Printf("[CreateOrderCardLink] Parsed CardLink response: %+v\n", cardLinkResp)
 
-		c.JSON(http.StatusOK, models.CreatePaymentResponse{
+		out := models.CreatePaymentResponse{
 			OrderID:     cardLinkResp.BillID,
 			PaymentLink: cardLinkResp.LinkPageURL,
-		})
+		}
+		if ob, err := json.Marshal(out); err == nil {
+			log.Printf("[CreateOrderCardLink] исходящий ответ клиенту: %s", string(ob))
+		}
+		c.JSON(http.StatusOK, out)
 		log.Println("[CreateOrderCardLink] => END")
 	}
 }

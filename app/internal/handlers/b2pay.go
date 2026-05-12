@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 // CreateOrderB2Pay creates a B2Pay invoice and returns the redirect URL (metadata.auth_url).
 func CreateOrderB2Pay(_ config.Config, client *b2pay.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		readBodyLogRestore(c, "CreateOrderB2Pay")
 		cfg := config.GetConfig()
 		if strings.TrimSpace(cfg.B2PayNotificationURL) == "" {
 			c.JSON(http.StatusPreconditionFailed, gin.H{
@@ -93,6 +95,7 @@ func CreateOrderB2Pay(_ config.Config, client *b2pay.Client) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		log.Printf("[CreateOrderB2Pay] исходящее тело в B2Pay (JSON): %s", string(body))
 
 		respBody, code, err := client.CreateInvoice(body)
 		if err != nil {
@@ -120,12 +123,16 @@ func CreateOrderB2Pay(_ config.Config, client *b2pay.Client) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, models.CreatePaymentResponse{
+		out := models.CreatePaymentResponse{
 			OrderID:     orderID,
 			InvoiceID:   inv.ID,
 			PaymentLink: authURL,
 			Status:      inv.Status,
-		})
+		}
+		if ob, err := json.Marshal(out); err == nil {
+			log.Printf("[CreateOrderB2Pay] исходящий ответ клиенту: %s", string(ob))
+		}
+		c.JSON(http.StatusOK, out)
 	}
 }
 
@@ -150,6 +157,7 @@ func HandleB2PayNotification(cfg config.Config, database *sql.DB) gin.HandlerFun
 			c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
 			return
 		}
+		slog.Default().Info("B2Pay notification входящее тело", "raw", string(body))
 
 		sig := c.GetHeader("X-Callback-Signature")
 		cfgNow := config.GetConfig()
