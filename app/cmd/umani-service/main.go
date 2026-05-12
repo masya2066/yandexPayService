@@ -45,6 +45,14 @@ func main() {
 			order.POST("/notification", handlers.HandleCardlinkNotification(cfg, initDB))
 		}
 	}
+	b2payGroup := router.Group("/b2pay")
+	{
+		order := b2payGroup.Group("/order")
+		{
+			order.POST("/create", handlers.CreateOrderB2Pay(cfg))
+			order.POST("/notification", handlers.HandleB2PayNotification(cfg, initDB))
+		}
+	}
 	log.Printf("Starting server on port %s...", cfg.AppPort)
 	if err := router.Run(":" + cfg.AppPort); err != nil {
 		log.Fatalf("Failed to start server: %v", err)

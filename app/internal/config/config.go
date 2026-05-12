@@ -17,6 +17,14 @@ type Config struct {
 	FailURL           string `json:"fail_url"`             // failed url to send user after failed payment
 	SendURL           string `json:"send_url"`             // url to send notification to another service
 	AppPort           string `json:"app_port"`             // service port
+	// B2Pay (отдельная касса; YooMoney и CardLink не затрагиваются)
+	B2PayUserID            string `json:"b2pay_user_id"`
+	B2PayEmail             string `json:"b2pay_email"`
+	B2PayAPIKey            string `json:"b2pay_api_key"`
+	B2PayBaseURL           string `json:"b2pay_base_url"`            // по умолчанию https://app.b2pay.online
+	B2PayNotificationURL   string `json:"b2pay_notification_url"`    // публичный URL POST коллбэка B2Pay
+	B2PayReturnURL         string `json:"b2pay_return_url"`          // return_url по умолчанию (кнопка «назад» в форме)
+	B2PayTokenExpiryHours  int    `json:"b2pay_token_expiry_hours"`  // 1–720, по умолчанию 24
 }
 
 var (
