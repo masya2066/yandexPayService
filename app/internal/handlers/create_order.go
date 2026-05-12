@@ -8,6 +8,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"umani-service/app/internal/config"
 	"umani-service/app/internal/models"
 	"umani-service/app/internal/utils"
@@ -15,26 +16,34 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func paymentDescription(d string) string {
+	s := strings.TrimSpace(d)
+	if s == "" {
+		return "Payment"
+	}
+	return s
+}
+
 func CreateOrder(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var order models.Order
-		if err := c.Bind(&order); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		var req models.CreatePaymentRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 			return
 		}
 
-		// Генерация уникального ID заказа
-		order.ID = utils.GenerateUUID()
+		orderID := req.OrderID
+		if orderID == "" {
+			orderID = utils.GenerateUUID()
+		}
 
-		// Формирование ссылки на оплату
 		yoomoneyBaseURL := "https://yoomoney.ru/quickpay/confirm.xml"
-		order.PaymentLink = fmt.Sprintf("%s?receiver=%s&quickpay-form=shop&targets=%s&sum=%s&successURL=%s&failURL=%s&label=%s",
-			yoomoneyBaseURL, cfg.Receiver, order.Description, order.Amount, cfg.SuccessURL, cfg.FailURL, order.ID)
+		paymentLink := fmt.Sprintf("%s?receiver=%s&quickpay-form=shop&targets=%s&sum=%s&successURL=%s&failURL=%s&label=%s",
+			yoomoneyBaseURL, cfg.Receiver, paymentDescription(req.Description), req.Amount, cfg.SuccessURL, cfg.FailURL, orderID)
 
-		// Возвращение ссылки клиенту
-		c.JSON(http.StatusOK, gin.H{
-			"order_id":     order.ID,
-			"payment_link": order.PaymentLink,
+		c.JSON(http.StatusOK, models.CreatePaymentResponse{
+			OrderID:     orderID,
+			PaymentLink: paymentLink,
 		})
 	}
 }
@@ -43,40 +52,44 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log.Println("[CreateOrderCardLink] => START")
 
-		// 1. Считываем данные, которые присылает клиент
-		var order models.OrderCardLink
-		if err := c.ShouldBindJSON(&order); err != nil {
+		// 1. Единая модель CreatePaymentRequest (currency обязателен для CardLink)
+		var req models.CreatePaymentRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
 			log.Printf("[CreateOrderCardLink] Error binding order: %v\n", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 			return
 		}
-		order.ShopID = cfg.ShopIDCardLink
+		if strings.TrimSpace(req.Currency) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "currency is required for cardlink"})
+			return
+		}
+		shopID := cfg.ShopIDCardLink
 
-		log.Printf("[CreateOrderCardLink] Order bound successfully: %+v\n", order)
+		log.Printf("[CreateOrderCardLink] Order bound successfully: %+v\n", req)
 
 		// 2. Готовим multipart/form-data для CardLink
 		var bodyBuffer bytes.Buffer
 		writer := multipart.NewWriter(&bodyBuffer)
 
 		log.Println("[CreateOrderCardLink] Writing multipart fields...")
-		if err := writer.WriteField("amount", order.Amount); err != nil {
+		if err := writer.WriteField("amount", req.Amount); err != nil {
 			log.Printf("[CreateOrderCardLink] Failed to write field 'amount': %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'amount': " + err.Error()})
 			return
 		}
-		if err := writer.WriteField("shop_id", order.ShopID); err != nil {
+		if err := writer.WriteField("shop_id", shopID); err != nil {
 			log.Printf("[CreateOrderCardLink] Failed to write field 'shop_id': %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'shop_id': " + err.Error()})
 			return
 		}
-		if err := writer.WriteField("currency_in", order.CurrencyIn); err != nil {
+		if err := writer.WriteField("currency_in", req.Currency); err != nil {
 			log.Printf("[CreateOrderCardLink] Failed to write field 'currency_id': %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'currency_id': " + err.Error()})
 			return
 		}
 
-		if order.PaymentMethod != "" {
-			if err := writer.WriteField("payment_method", order.PaymentMethod); err != nil {
+		if req.PaymentMethod != "" {
+			if err := writer.WriteField("payment_method", req.PaymentMethod); err != nil {
 				log.Printf("[CreateOrderCardLink] Failed to write field 'payment_methods': %v\n", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write field 'payment_methods': " + err.Error()})
 				return
@@ -95,7 +108,7 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 
 		// 3. Формируем запрос к CardLink
 		log.Println("[CreateOrderCardLink] Creating request to CardLink...")
-		req, err := http.NewRequest("POST", "https://cardlink.link/api/v1/bill/create", &bodyBuffer)
+		httpReq, err := http.NewRequest("POST", "https://cardlink.link/api/v1/bill/create", &bodyBuffer)
 		if err != nil {
 			log.Printf("[CreateOrderCardLink] Failed to create request: %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create request: " + err.Error()})
@@ -104,14 +117,14 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 		log.Println("[CreateOrderCardLink] Request created.")
 
 		// Устанавливаем заголовок Authorization и Content-Type для multipart
-		req.Header.Set("Authorization", "Bearer "+cfg.AuthTokenCardLink)
-		req.Header.Set("Content-Type", writer.FormDataContentType())
+		httpReq.Header.Set("Authorization", "Bearer "+cfg.AuthTokenCardLink)
+		httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 		log.Println("[CreateOrderCardLink] Headers set (Authorization, Content-Type).")
 
 		// 4. Отправляем запрос
 		log.Println("[CreateOrderCardLink] Sending request to CardLink...")
 		client := &http.Client{}
-		resp, err := client.Do(req)
+		resp, err := client.Do(httpReq)
 		if err != nil {
 			log.Printf("[CreateOrderCardLink] Failed to send request: %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send request: " + err.Error()})
@@ -138,10 +151,9 @@ func CreateOrderCardLink(cfg config.Config) gin.HandlerFunc {
 		}
 		log.Printf("[CreateOrderCardLink] Parsed CardLink response: %+v\n", cardLinkResp)
 
-		// Возвращаем нужные поля
-		c.JSON(http.StatusOK, gin.H{
-			"order_id":     cardLinkResp.BillID,
-			"payment_link": cardLinkResp.LinkPageURL,
+		c.JSON(http.StatusOK, models.CreatePaymentResponse{
+			OrderID:     cardLinkResp.BillID,
+			PaymentLink: cardLinkResp.LinkPageURL,
 		})
 		log.Println("[CreateOrderCardLink] => END")
 	}

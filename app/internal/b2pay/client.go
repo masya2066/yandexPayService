@@ -13,44 +13,30 @@ import (
 	"sync"
 	"time"
 	"umani-service/app/internal/config"
-	"umani-service/app/internal/models"
 )
 
-const defaultBaseURL = "https://app.b2pay.online"
-
-type tokenGetRequest struct {
-	UserID           string `json:"user_id"`
-	Email            string `json:"email"`
-	APIKey           string `json:"api_key"`
-	TokenExpiryHours int    `json:"token_expiry_hours"`
-}
-
-type tokenGetResponse struct {
-	Token string `json:"token"`
-}
-
-// InvoiceCreateRequest — тело POST /v1/invoices (объявлено в client.go, заполняется в handlers/b2pay.go).
-type InvoiceCreateRequest struct {
-	CustomerID          string         `json:"customer_id"`
-	Amount              float64        `json:"amount"`
-	Currency            string         `json:"currency"`
-	Description         string         `json:"description"`
-	IsReturningCustomer *bool          `json:"is_returning_customer,omitempty"`
-	Metadata            map[string]any `json:"metadata"`
-}
-
-var (
-	tokenMu        sync.Mutex
-	lastCredFP     string
-	cachedToken    string
-	tokenDeadline  time.Time
+const (
+	defaultBaseURL     = "https://app.b2pay.online"
+	defaultTokenExpiry = 24
+	tokenRefreshSlack  = 5 * time.Minute
 )
 
-func credFingerprint(cfg config.Config) string {
-	return cfg.B2PayUserID + "\x00" + cfg.B2PayEmail + "\x00" + cfg.B2PayAPIKey
+type Client struct {
+	httpClient *http.Client
+
+	mu         sync.Mutex
+	token      string
+	validUntil time.Time
 }
 
-func baseURL(cfg config.Config) string {
+func NewClient() *Client {
+	return &Client{
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func (c *Client) baseURL() string {
+	cfg := config.GetConfig()
 	u := strings.TrimSpace(cfg.B2PayBaseURL)
 	if u == "" {
 		return defaultBaseURL
@@ -58,155 +44,168 @@ func baseURL(cfg config.Config) string {
 	return strings.TrimRight(u, "/")
 }
 
-func tokenExpiryHours(cfg config.Config) int {
-	if cfg.B2PayTokenExpiryHours < 1 {
-		return 24
+func (c *Client) tokenExpiryHours() int {
+	h := config.GetConfig().B2PayTokenExpiryHours
+	if h <= 0 {
+		return defaultTokenExpiry
 	}
-	if cfg.B2PayTokenExpiryHours > 720 {
+	if h > 720 {
 		return 720
 	}
-	return cfg.B2PayTokenExpiryHours
+	return h
 }
 
-// InvalidateTokenCache сбрасывает кэш JWT (после смены ключа или 401).
-func InvalidateTokenCache() {
-	tokenMu.Lock()
-	defer tokenMu.Unlock()
-	cachedToken = ""
-	lastCredFP = ""
-	tokenDeadline = time.Time{}
-}
-
-func bearerToken(cfg config.Config) (string, error) {
+func (c *Client) getToken() (string, error) {
+	cfg := config.GetConfig()
 	if cfg.B2PayUserID == "" || cfg.B2PayEmail == "" || cfg.B2PayAPIKey == "" {
-		return "", fmt.Errorf("b2pay: не заданы user_id, email или api_key")
-	}
-	fp := credFingerprint(cfg)
-	margin := 5 * time.Minute
-	ttl := time.Duration(tokenExpiryHours(cfg)) * time.Hour
-
-	tokenMu.Lock()
-	defer tokenMu.Unlock()
-
-	if cachedToken != "" && fp == lastCredFP && time.Now().Before(tokenDeadline) {
-		return cachedToken, nil
+		return "", fmt.Errorf("b2pay: b2pay_user_id, b2pay_email, b2pay_api_key are required in config")
 	}
 
-	body, err := json.Marshal(tokenGetRequest{
-		UserID:           cfg.B2PayUserID,
-		Email:            cfg.B2PayEmail,
-		APIKey:           cfg.B2PayAPIKey,
-		TokenExpiryHours: tokenExpiryHours(cfg),
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	if c.token != "" && now.Before(c.validUntil) {
+		return c.token, nil
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"user_id":            cfg.B2PayUserID,
+		"email":              cfg.B2PayEmail,
+		"api_key":            cfg.B2PayAPIKey,
+		"token_expiry_hours": c.tokenExpiryHours(),
 	})
 	if err != nil {
 		return "", err
 	}
-	tok, err := postTokenJSON(cfg, baseURL(cfg)+"/v1/auth/token/get", body)
-	if err != nil {
-		return "", err
-	}
-	cachedToken = tok
-	lastCredFP = fp
-	tokenDeadline = time.Now().Add(ttl - margin)
-	return cachedToken, nil
-}
 
-func postTokenJSON(cfg config.Config, url string, body []byte) (string, error) {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, c.baseURL()+"/v1/auth/token/get", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("b2pay token: HTTP %d: %s", resp.StatusCode, string(raw))
-	}
-	var tr tokenGetResponse
-	if err := json.Unmarshal(raw, &tr); err != nil {
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return "", err
 	}
-	if tr.Token == "" {
-		return "", fmt.Errorf("b2pay token: пустой token в ответе")
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("b2pay token: HTTP %d: %s", resp.StatusCode, string(data))
 	}
-	return tr.Token, nil
+
+	var out struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", err
+	}
+	if out.Token == "" {
+		return "", fmt.Errorf("b2pay: empty token in response")
+	}
+
+	c.token = out.Token
+	c.validUntil = now.Add(time.Duration(c.tokenExpiryHours())*time.Hour - tokenRefreshSlack)
+	return c.token, nil
 }
 
-// CreateInvoice создаёт счёт в B2Pay (POST /v1/invoices). При 401 один раз сбрасывает токен и повторяет запрос.
-func CreateInvoice(cfg config.Config, inv InvoiceCreateRequest) (*models.B2PayInvoiceResponse, error) {
-	do := func(bearer string) (*http.Response, []byte, error) {
-		body, err := json.Marshal(inv)
+func (c *Client) invalidateToken() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.token = ""
+	c.validUntil = time.Time{}
+}
+
+// CreateInvoice calls POST /v1/invoices. On 401, invalidates the token, obtains a new one, and retries once.
+func (c *Client) CreateInvoice(payload []byte) ([]byte, int, error) {
+	url := c.baseURL() + "/v1/invoices"
+	var lastCode int
+	for attempt := 0; attempt < 2; attempt++ {
+		tok, err := c.getToken()
 		if err != nil {
-			return nil, nil, err
+			return nil, 0, err
 		}
-		req, err := http.NewRequest(http.MethodPost, baseURL(cfg)+"/v1/invoices", bytes.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
-			return nil, nil, err
+			return nil, 0, err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		resp, err := http.DefaultClient.Do(req)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return nil, nil, err
+			return nil, 0, err
 		}
-		raw, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return resp, raw, nil
-	}
-
-	tok, err := bearerToken(cfg)
-	if err != nil {
-		return nil, err
-	}
-	resp, raw, err := do(tok)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		InvalidateTokenCache()
-		tok2, err2 := bearerToken(cfg)
-		if err2 != nil {
-			return nil, err2
+		body, rerr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if rerr != nil {
+			return nil, resp.StatusCode, rerr
 		}
-		resp, raw, err = do(tok2)
-		if err != nil {
-			return nil, err
+		lastCode = resp.StatusCode
+		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
+			c.invalidateToken()
+			continue
 		}
+		return body, resp.StatusCode, nil
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("b2pay invoices: HTTP %d: %s", resp.StatusCode, string(raw))
-	}
-	var out models.B2PayInvoiceResponse
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return nil, lastCode, fmt.Errorf("b2pay: create invoice: unauthorized after retry")
 }
 
-// VerifyCallbackSignature проверяет заголовок X-Callback-Signature для сырого JSON-тела.
-func VerifyCallbackSignature(rawBody []byte, signatureHeader, apiKey string) bool {
-	if apiKey == "" || signatureHeader == "" {
-		return false
-	}
-	h := strings.TrimSpace(signatureHeader)
-	eq := strings.Index(h, "=")
-	if eq < 0 {
-		return false
-	}
-	algo := strings.ToLower(strings.TrimSpace(h[:eq]))
-	if algo != "sha256" {
-		return false
-	}
-	hexPart := strings.TrimSpace(h[eq+1:])
-	wantBytes, err := hex.DecodeString(hexPart)
+// TransactionStatus returns GET /v1/transactions/{id}/status
+func (c *Client) TransactionStatus(transactionID string) ([]byte, int, error) {
+	tok, err := c.getToken()
 	if err != nil {
+		return nil, 0, err
+	}
+	url := fmt.Sprintf("%s/v1/transactions/%s/status", c.baseURL(), transactionID)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusUnauthorized {
+		c.invalidateToken()
+		tok2, err := c.getToken()
+		if err != nil {
+			return body, resp.StatusCode, err
+		}
+		req2, _ := http.NewRequest(http.MethodGet, url, nil)
+		req2.Header.Set("Authorization", "Bearer "+tok2)
+		resp2, err := c.httpClient.Do(req2)
+		if err != nil {
+			return body, resp.StatusCode, err
+		}
+		defer resp2.Body.Close()
+		body2, _ := io.ReadAll(resp2.Body)
+		return body2, resp2.StatusCode, nil
+	}
+	return body, resp.StatusCode, nil
+}
+
+// VerifyCallbackSignature checks X-Callback-Signature: sha256=<hex> per B2Pay docs.
+func VerifyCallbackSignature(apiKey string, rawBody []byte, header string) bool {
+	if apiKey == "" || len(rawBody) == 0 {
 		return false
 	}
+	const prefix = "sha256="
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	wantHex := strings.TrimSpace(strings.TrimPrefix(header, prefix))
 	mac := hmac.New(sha256.New, []byte(apiKey))
 	mac.Write(rawBody)
-	return hmac.Equal(mac.Sum(nil), wantBytes)
+	sum := mac.Sum(nil)
+	gotHex := hex.EncodeToString(sum)
+	return hmac.Equal([]byte(wantHex), []byte(gotHex))
 }
