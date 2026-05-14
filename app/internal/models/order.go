@@ -2,7 +2,7 @@ package models
 
 import "strings"
 
-// CreatePaymentRequest is the unified JSON body for /yandex/order/create, /cardlink/order/create, and /b2pay/order/create.
+// CreatePaymentRequest is the unified JSON body for /yandex/order/create, /cardlink/order/create, /b2pay/order/create и /auropay/order/create.
 // Extra fields (currency, payment_method, customer_id, …) are ignored by methods that do not use them.
 type CreatePaymentRequest struct {
 	Amount              string `json:"amount" binding:"required"`

@@ -29,6 +29,13 @@ type Config struct {
 	B2PayTestMode         bool   `json:"b2pay_test_mode"`          // metadata.test_mode
 	B2PayReturnURL        string `json:"b2pay_return_url"`         // user redirect after payment; default: success_url
 	B2PayNotificationURL  string `json:"b2pay_notification_url"`   // public URL of POST /b2pay/order/notification
+
+	// Aurapay (https://app.aurapay.tech) — см. auropay.md
+	AuropayBaseURL          string `json:"auropay_base_url"`           // по умолчанию https://app.aurapay.tech
+	AuropayAPIKey           string `json:"auropay_api_key"`            // заголовок X-ApiKey
+	AuropayShopID           string `json:"auropay_shop_id"`            // заголовок X-ShopId
+	AuropayWebhookSecret    string `json:"auropay_webhook_secret"`     // секретный ключ #2 для X-SIGNATURE webhook
+	AuropayNotificationURL  string `json:"auropay_notification_url"` // публичный URL POST /auropay/order/notification
 }
 
 var (
@@ -104,10 +111,15 @@ func LoadConfig() Config {
 	applyB2PayEnvOverrides()
 	currentConfig.B2PayNotificationURL = strings.TrimSpace(currentConfig.B2PayNotificationURL)
 
+	mergeAuropayFromCwdIfMissing()
+	applyAuropayEnvOverrides()
+	currentConfig.AuropayNotificationURL = strings.TrimSpace(currentConfig.AuropayNotificationURL)
+
 	slog.Default().Info("Config loaded",
 		"path", configPath,
 		"env_CONFIG_PATH", os.Getenv("CONFIG_PATH"),
-		"b2pay_notification_set", currentConfig.B2PayNotificationURL != "")
+		"b2pay_notification_set", currentConfig.B2PayNotificationURL != "",
+		"auropay_notification_set", currentConfig.AuropayNotificationURL != "")
 
 	return currentConfig
 }
@@ -144,6 +156,41 @@ func applyB2PayEnvOverrides() {
 	if v := strings.TrimSpace(os.Getenv("B2PAY_NOTIFICATION_URL")); v != "" {
 		currentConfig.B2PayNotificationURL = v
 		slog.Default().Info("b2pay_notification_url set from B2PAY_NOTIFICATION_URL")
+	}
+}
+
+// mergeAuropayFromCwdIfMissing — если в основном config нет auropay_notification_url, подставляем из ./config.json (как у B2Pay).
+func mergeAuropayFromCwdIfMissing() {
+	if strings.TrimSpace(currentConfig.AuropayNotificationURL) != "" {
+		return
+	}
+	cwdFile, err := filepath.Abs("config.json")
+	if err != nil {
+		return
+	}
+	primary, err := filepath.Abs(configPath)
+	if err == nil && filepath.Clean(cwdFile) == filepath.Clean(primary) {
+		return
+	}
+	f, err := os.Open("config.json")
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	var alt Config
+	if err := json.NewDecoder(f).Decode(&alt); err != nil {
+		return
+	}
+	if s := strings.TrimSpace(alt.AuropayNotificationURL); s != "" {
+		slog.Default().Info("auropay_notification_url merged from CWD config.json", "main", configPath)
+		currentConfig.AuropayNotificationURL = s
+	}
+}
+
+func applyAuropayEnvOverrides() {
+	if v := strings.TrimSpace(os.Getenv("AUROPAY_NOTIFICATION_URL")); v != "" {
+		currentConfig.AuropayNotificationURL = v
+		slog.Default().Info("auropay_notification_url set from AUROPAY_NOTIFICATION_URL")
 	}
 }
 
