@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"umani-service/app/internal/auropay"
 	"umani-service/app/internal/b2pay"
 	"umani-service/app/internal/config"
 	"umani-service/app/internal/consumer"
@@ -55,6 +56,16 @@ func main() {
 			order.POST("/create", handlers.CreateOrderB2Pay(cfg, b2payClient))
 			order.POST("/notification", handlers.HandleB2PayNotification(cfg, initDB))
 			order.GET("/:id/status", handlers.B2PayTransactionStatus(cfg, b2payClient))
+		}
+	}
+	auropayClient := auropay.NewClient()
+	aur := router.Group("/auropay")
+	{
+		order := aur.Group("/order")
+		{
+			order.POST("/create", handlers.CreateOrderAuropay(cfg, auropayClient))
+			order.POST("/notification", handlers.HandleAuropayNotification(cfg, initDB))
+			order.GET("/:id/status", handlers.AuropayInvoiceStatus(cfg, auropayClient))
 		}
 	}
 	log.Printf("Starting server on port %s...", cfg.AppPort)
